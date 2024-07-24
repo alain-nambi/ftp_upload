@@ -1,9 +1,10 @@
-import ftp from "basic-ftp"
-import dotenv from "dotenv"
-import fs from "fs"
+import ftp from "basic-ftp";
+import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 
 // Load configurations from .env file
-dotenv.config()
+dotenv.config();
 
 // Retrieve configuration from environment variables
 const CONFIG = {
@@ -12,14 +13,12 @@ const CONFIG = {
     PASSWORD: process.env.FTP_PASSWORD,
     PORT: parseInt(process.env.FTP_PORT),
     SECURE: process.env.FTP_SECURE === "true",
-}
+};
 
 // Function to connect to the FTP server
 const connectFTP = async (host, user, port, password, secure) => {
-    const FTPClient =  new ftp.Client()
-    
-    // Enable verbose logging for debugging purposes
-    // FTPClient.ftp.verbose = true
+    const FTPClient = new ftp.Client();
+    // FTPClient.ftp.verbose = true; // Enable verbose logging for debugging purposes
 
     try {
         // Connect to the FTP server
@@ -34,84 +33,135 @@ const connectFTP = async (host, user, port, password, secure) => {
                 rejectUnauthorized: false, // Disable certificate validation (use cautiously)
             },
         });
-
-        console.log('Connected to FTP server successfully.');
-
+        console.log("Connected to FTP server successfully.");
         return FTPClient;
     } catch (error) {
         console.error(`>> Error connecting to FTP server: ${error.message}`);
         throw error; // Rethrow the error to handle it further up
     }
-}
+};
 
 // Function to list files and directories on the FTP server
 const showLists = async (client) => {
     try {
-        console.log('Fetching directory listing...')
-        const list = await client.list()
-        console.log('Directory listing fetched successfully.')
+        console.log("Fetching directory listing...");
+        const list = await client.list();
+        console.log("Directory listing fetched successfully.");
         return list;
     } catch (error) {
         console.error(`Error fetching directory listing: ${error.message}`);
         throw error; // Rethrow the error to handle it further up
     }
-}
+};
 
 // Function to get file size in megabytes
 const getFileSizeInMB = (filepath) => {
-    const stats = fs.statSync(filepath)
-    return (stats.size / (1024 * 1024)).toFixed(2)
-}
+    const stats = fs.statSync(filepath);
+    return (stats.size / (1024 * 1024)).toFixed(2);
+};
+
+// Function to check if a folder should be ignored
+const ignoreFolder = (localPath) => {
+    const ignoreFolders = ["node_modules", ".git"];
+    return ignoreFolders.some((folder) => localPath.includes(folder));
+};
+
+// Function to upload a folder to the FTP server
+const uploadFolder = async (client, localPath, remotePath) => {
+    if (ignoreFolder(localPath) || !fs.statSync(localPath).isDirectory()) {
+        console.log(`Ignoring folder: ${localPath}`);
+        return;
+    }
+
+    try {
+        const files = fs.readdirSync(localPath);
+        for (const file of files) {
+            const fullLocalPath = path.join(localPath, file);
+            const fullRemotePath = path.join(remotePath, file);
+
+            if (fs.statSync(fullLocalPath).isDirectory()) {
+                await uploadFolder(client, fullLocalPath, fullRemotePath);
+            } else {
+                await uploadFile(client, fullLocalPath, fullRemotePath);
+            }
+        }
+    } catch (error) {
+        console.error(`Error uploading folder: ${error.message}`);
+        throw error; // Rethrow the error to handle it further up
+    }
+};
 
 // Function to upload a file to the FTP server
 const uploadFile = async (client, localPath, remotePath) => {
     try {
-        console.log(`Uploading file from ${localPath} to ${remotePath}`)
+        console.log(`Uploading file from ${localPath} to ${remotePath}`);
 
-        const fileSizeInMB = getFileSizeInMB(localPath) // Get file size in MB
+        const fileSizeInMB = getFileSizeInMB(localPath); // Get file size in MB
 
-        client.trackProgress(info => {
-            console.log(`File: ${info.name} \nSize : ${fileSizeInMB} MB`);
-            // console.log(`Transferred: ${info.bytes} bytes`);
-            // console.log(`Transferred Overall: ${info.bytesOverall} bytes`);
-            console.log(`Progress : ${(info.bytesOverall / (fileSizeInMB * 1024 * 1024) * 100).toFixed(2)}%`)
-        })
+        // Ensure the remote directory exists
+        const remoteDir = path.dirname(remotePath);
+        await client.ensureDir(remoteDir);
 
-        await client.uploadFrom(localPath, remotePath)
+        // Track the progress of the upload
+        client.trackProgress((info) => {
+            console.log(`File: ${info.name} \nSize: ${fileSizeInMB} MB | ${info.bytesOverall} Bytes`);
+            console.log(`Progress: ${info.bytesOverall > 0 && (info.bytesOverall / (fileSizeInMB * 1024 * 1024) * 100).toFixed(2)}%`);
+        });
+
+        // Upload the file
+        await client.uploadFrom(localPath, remotePath);
 
         // Stop tracking progress
         client.trackProgress();
 
-        console.log('File upload successfully')
+        console.log("File uploaded successfully.");
     } catch (error) {
-        console.error(`Error uploading file : ${error.message}`)
+        console.error(`Error uploading file: ${error.message}`);
         throw error; // Rethrow the error to handle it further up
     }
-}
+};
 
-// Main functions to run the FTP Operations
+// Main function to run the FTP operations
 const main = async () => {
     try {
-        const FPT_CLIENT = await connectFTP(
+        // Connect to the FTP server
+        const FTP_CLIENT = await connectFTP(
             CONFIG.HOST,
             CONFIG.USER,
             CONFIG.PORT,
             CONFIG.PASSWORD,
             CONFIG.SECURE
-        )
+        );
 
-        const directoryList = await showLists(FPT_CLIENT)
-        console.log('Directory List : ', directoryList)
+        // Fetch and display directory listing from the FTP server
+        const directoryList = await showLists(FTP_CLIENT);
+        console.log("Directory List:", directoryList);
 
-        await uploadFile(FPT_CLIENT, 'test.mkv', 'test.mkv')
+        // Specify the local and remote paths for uploading
+        const localPath = "/home/alain/Vidéos/ftp_upload_backup"; // Local folder path
+        const remotePath = "/ftp_upload_backup"; // Remote folder path
+
+        // Upload the folder
+        await uploadFolder(FTP_CLIENT, localPath, remotePath);
 
         // Close the FTP connection
-        FPT_CLIENT.close()
-        console.log('FTP connection closed.');
+        FTP_CLIENT.close();
+        console.log("FTP connection closed.");
     } catch (error) {
-        console.error(`Error in FTP operations : ${error.message}`)
+        console.error(`Error in FTP operations: ${error.message}`);
     }
-}
+};
 
-// Run the main functions
-main()
+// Run the main function
+/***
+ * 
+    Summary of the Code:
+
+    Load Configurations: Load the configurations from the .env file using the dotenv library.
+    Connect to FTP Server: Function connectFTP connects to the FTP server using the provided configurations.
+    Show Directory List: Function showLists fetches and displays the directory listing from the FTP server.
+    Upload File: Function uploadFile uploads a single file to the FTP server and ensures the remote directory exists.
+    Upload Folder: Function uploadFolder recursively uploads all files and subfolders from a local folder to the FTP server, ignoring specified folders.
+    Main Function: The main function coordinates connecting to the FTP server, fetching the directory list, uploading the folder, and closing the FTP connection.
+ */
+main();
