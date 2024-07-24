@@ -1,5 +1,6 @@
 import ftp from "basic-ftp"
 import dotenv from "dotenv"
+import fs from "fs"
 
 // Load configurations from .env file
 dotenv.config()
@@ -18,7 +19,7 @@ const connectFTP = async (host, user, port, password, secure) => {
     const FTPClient =  new ftp.Client()
     
     // Enable verbose logging for debugging purposes
-    FTPClient.ftp.verbose = true
+    // FTPClient.ftp.verbose = true
 
     try {
         // Connect to the FTP server
@@ -56,15 +57,24 @@ const showLists = async (client) => {
     }
 }
 
+// Function to get file size in megabytes
+const getFileSizeInMB = (filepath) => {
+    const stats = fs.statSync(filepath)
+    return (stats.size / (1024 * 1024)).toFixed(2)
+}
+
 // Function to upload a file to the FTP server
 const uploadFile = async (client, localPath, remotePath) => {
     try {
         console.log(`Uploading file from ${localPath} to ${remotePath}`)
 
+        const fileSizeInMB = getFileSizeInMB(localPath) // Get file size in MB
+
         client.trackProgress(info => {
-            console.log(`File: ${info.name}`);
-            console.log(`Transferred: ${info.bytes} bytes`);
-            console.log(`Transferred Overall: ${info.bytesOverall} bytes`);
+            console.log(`File: ${info.name} \nSize : ${fileSizeInMB} MB`);
+            // console.log(`Transferred: ${info.bytes} bytes`);
+            // console.log(`Transferred Overall: ${info.bytesOverall} bytes`);
+            console.log(`Progress : ${(info.bytesOverall / (fileSizeInMB * 1024 * 1024) * 100).toFixed(2)}%`)
         })
 
         await client.uploadFrom(localPath, remotePath)
