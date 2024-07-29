@@ -2,6 +2,7 @@ import ftp from "basic-ftp";
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
+import logger from "./logger.js"; // Import the logger
 
 // Load configurations from .env file
 dotenv.config();
@@ -18,11 +19,25 @@ const CONFIG = {
 // Function to connect to the FTP server
 const connectFTP = async (host, user, port, password, secure) => {
     const FTPClient = new ftp.Client();
+
+    // Set a custom timeout value (e.g., 5 minutes)
+    /**
+     * The 425 Error while transferring data: ECONNABORTED - Connection aborted typically indicates that the FTP connection was interrupted or closed unexpectedly during a file or folder transfer. This could be due to several reasons:
+        Possible Causes
+
+        Network Issues: Temporary network disruptions or poor connectivity might be causing the connection to drop.
+        Server Configuration: The FTP server might have limitations or settings that are interrupting long transfers.
+        Client Configuration: Misconfigured FTP client settings could lead to interruptions in data transfer.
+        Firewall/Security Software: Firewalls or security software could be blocking or interrupting FTP connections.
+     */
+    FTPClient.ftp.timeout = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+
     // FTPClient.ftp.verbose = true; // Enable verbose logging for debugging purposes
 
     try {
         // Connect to the FTP server
-        console.log(`Connecting to FTP server at ${host}:${port}...`);
+        logger.info(`Connecting to FTP server at ${host}:${port}...`);
         await FTPClient.access({
             host,
             user,
@@ -33,10 +48,10 @@ const connectFTP = async (host, user, port, password, secure) => {
                 rejectUnauthorized: false, // Disable certificate validation (use cautiously)
             },
         });
-        console.log("Connected to FTP server successfully.");
+        logger.info("Connected to FTP server successfully.");
         return FTPClient;
     } catch (error) {
-        console.error(`>> Error connecting to FTP server: ${error.message}`);
+        logger.error(`>> Error connecting to FTP server: ${error.message}`);
         throw error; // Rethrow the error to handle it further up
     }
 };
@@ -44,12 +59,12 @@ const connectFTP = async (host, user, port, password, secure) => {
 // Function to list files and directories on the FTP server
 const showLists = async (client) => {
     try {
-        console.log("Fetching directory listing...");
+        logger.info("Fetching directory listing...");
         const list = await client.list();
-        console.log("Directory listing fetched successfully.");
+        logger.info("Directory listing fetched successfully.");
         return list;
     } catch (error) {
-        console.error(`Error fetching directory listing: ${error.message}`);
+        logger.error(`Error fetching directory listing: ${error.message}`);
         throw error; // Rethrow the error to handle it further up
     }
 };
@@ -69,7 +84,7 @@ const ignoreFolder = (localPath) => {
 // Function to upload a folder to the FTP server
 const uploadFolder = async (client, localPath, remotePath) => {
     if (ignoreFolder(localPath) || !fs.statSync(localPath).isDirectory()) {
-        console.log(`Ignoring folder: ${localPath}`);
+        logger.info(`Ignoring folder: ${localPath}`);
         return;
     }
 
@@ -86,7 +101,7 @@ const uploadFolder = async (client, localPath, remotePath) => {
             }
         }
     } catch (error) {
-        console.error(`Error uploading folder: ${error.message}`);
+        logger.error(`Error uploading folder: ${error.message}`);
         throw error; // Rethrow the error to handle it further up
     }
 };
@@ -94,7 +109,7 @@ const uploadFolder = async (client, localPath, remotePath) => {
 // Function to upload a file to the FTP server
 const uploadFile = async (client, localPath, remotePath) => {
     try {
-        console.log(`Uploading file from ${localPath} to ${remotePath}`);
+        logger.info(`Uploading file from ${localPath} to ${remotePath}`);
 
         const fileSizeInMB = getFileSizeInMB(localPath); // Get file size in MB
 
@@ -104,8 +119,8 @@ const uploadFile = async (client, localPath, remotePath) => {
 
         // Track the progress of the upload
         client.trackProgress((info) => {
-            console.log(`File: ${info.name} \nSize: ${fileSizeInMB} MB | ${info.bytesOverall} Bytes`);
-            console.log(`Progress: ${info.bytesOverall > 0 && (info.bytesOverall / (fileSizeInMB * 1024 * 1024) * 100).toFixed(2)}%`);
+            logger.info(`File: ${info.name} \nSize: ${fileSizeInMB} MB | ${info.bytesOverall} Bytes`);
+            logger.info(`Progress: ${info.bytesOverall > 0 && (info.bytesOverall / (fileSizeInMB * 1024 * 1024) * 100).toFixed(2)}%`);
         });
 
         // Upload the file
@@ -114,9 +129,9 @@ const uploadFile = async (client, localPath, remotePath) => {
         // Stop tracking progress
         client.trackProgress();
 
-        console.log("File uploaded successfully.");
+        logger.info("File uploaded successfully.");
     } catch (error) {
-        console.error(`Error uploading file: ${error.message}`);
+        logger.error(`Error uploading file: ${error.message}`);
         throw error; // Rethrow the error to handle it further up
     }
 };
@@ -135,7 +150,9 @@ const main = async () => {
 
         // Fetch and display directory listing from the FTP server
         const directoryList = await showLists(FTP_CLIENT);
-        console.log("Directory List:", directoryList);
+        // Convert directoryList to a JSON string
+        const directoryListString = JSON.stringify(directoryList, null, 2);
+        logger.info(`Directory List \n ${directoryListString}`, );
 
         // Specify the local and remote paths for uploading
         const localPath = "/home/alain/Vidéos/ftp_upload_backup"; // Local folder path
@@ -146,22 +163,11 @@ const main = async () => {
 
         // Close the FTP connection
         FTP_CLIENT.close();
-        console.log("FTP connection closed.");
+        logger.info("FTP connection closed.");
     } catch (error) {
-        console.error(`Error in FTP operations: ${error.message}`);
+        logger.error(`Error in FTP operations: ${error.message}`);
     }
 };
 
 // Run the main function
-/***
- * 
-    Summary of the Code:
-
-    Load Configurations: Load the configurations from the .env file using the dotenv library.
-    Connect to FTP Server: Function connectFTP connects to the FTP server using the provided configurations.
-    Show Directory List: Function showLists fetches and displays the directory listing from the FTP server.
-    Upload File: Function uploadFile uploads a single file to the FTP server and ensures the remote directory exists.
-    Upload Folder: Function uploadFolder recursively uploads all files and subfolders from a local folder to the FTP server, ignoring specified folders.
-    Main Function: The main function coordinates connecting to the FTP server, fetching the directory list, uploading the folder, and closing the FTP connection.
- */
 main();
